@@ -6,6 +6,7 @@ GameBoy 情感、孤独、低保真（Lo-fi）的天气体验原型。它不会�
 
 - 免费天气 API：使用 Open-Meteo，无需 API Key。
 - 不显示天气数字：只把 `weather_code` 和风速映射成氛围模式。
+- 全球城市选择：可以手动搜索城市，用候选城市坐标切换当前天空。
 - Canvas 手绘动画：所有天气场景都由 `requestAnimationFrame` 逐帧绘制。
 - 低保真音效：用 WebAudio 生成雨声、风噪、雾感脉冲和方波底噪。
 - PC + 安卓：Vite Web App + PWA manifest + service worker，可在安卓浏览器里添加到主屏幕。
@@ -24,7 +25,7 @@ npm install
 npm run dev
 ```
 
-打开本地地址后，应用会尝试读取设备位置来判断实时天气；如果定位不可用，会静默使用默认坐标进入一个氛围模式。
+打开本地地址后，应用会尝试读取设备位置来判断实时天气；如果定位不可用，会静默使用默认坐标进入一个氛围模式。也可以在 `CITY SIGNAL` 中输入全球城市名并选择候选城市。
 
 ## 构建
 
@@ -33,4 +34,3 @@ npm run build
 ```
 
 构建产物会生成到 `dist/`。
-

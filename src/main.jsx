@@ -34,6 +34,13 @@ const MODES = {
 };
 
 const modeList = Object.values(MODES);
+const DEFAULT_PLACE = {
+  name: "Shanghai",
+  country: "China",
+  latitude: 31.2304,
+  longitude: 121.4737,
+  source: "fallback",
+};
 
 function classifyWeather(code, windSpeed) {
   if (windSpeed >= 28) return "wind";
@@ -45,7 +52,7 @@ function classifyWeather(code, windSpeed) {
 
 async function getPosition() {
   if (!("geolocation" in navigator)) {
-    return { latitude: 31.2304, longitude: 121.4737, source: "fallback" };
+    return DEFAULT_PLACE;
   }
 
   return new Promise((resolve) => {
@@ -56,28 +63,72 @@ async function getPosition() {
           longitude: position.coords.longitude,
           source: "device",
         }),
-      () => resolve({ latitude: 31.2304, longitude: 121.4737, source: "fallback" }),
+      () => resolve(DEFAULT_PLACE),
       { enableHighAccuracy: false, timeout: 5000, maximumAge: 900000 },
     );
   });
 }
 
-async function fetchWeatherMode() {
-  const position = await getPosition();
+async function fetchWeatherMode(place) {
+  const position = place || (await getPosition());
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", position.latitude);
   url.searchParams.set("longitude", position.longitude);
   url.searchParams.set("current", "weather_code,wind_speed_10m");
   url.searchParams.set("timezone", "auto");
 
-  const response = await fetch(url);
+  const response = await fetchWithRetry(url);
   if (!response.ok) throw new Error("weather fetch failed");
   const data = await response.json();
   const current = data.current || {};
   return {
     mode: classifyWeather(current.weather_code, current.wind_speed_10m || 0),
     source: position.source,
+    place: position.name ? position : null,
   };
+}
+
+async function fetchWithRetry(url, attempts = 2) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12000);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 600));
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  throw lastError;
+}
+
+function formatPlace(place) {
+  return [place.name, place.admin1, place.country].filter(Boolean).join(", ");
+}
+
+async function searchPlaces(query) {
+  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+  url.searchParams.set("name", query);
+  url.searchParams.set("count", "5");
+  url.searchParams.set("language", "zh");
+  url.searchParams.set("format", "json");
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("city search failed");
+  const data = await response.json();
+  return (data.results || []).map((place) => ({
+    id: place.id,
+    name: place.name,
+    admin1: place.admin1,
+    country: place.country,
+    latitude: place.latitude,
+    longitude: place.longitude,
+    source: "city",
+  }));
 }
 
 function CanvasStage({ mode, soundOn }) {
@@ -268,18 +319,28 @@ function App() {
   const [mode, setMode] = useState("rain");
   const [soundOn, setSoundOn] = useState(false);
   const [status, setStatus] = useState("LIVE SKY");
+  const [placeName, setPlaceName] = useState("DEVICE SKY");
+  const [cityQuery, setCityQuery] = useState("");
+  const [cityResults, setCityResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const selected = MODES[mode];
 
   useEffect(() => {
     let alive = true;
+    setIsLoadingWeather(true);
     fetchWeatherMode()
       .then((result) => {
         if (!alive) return;
         setMode(result.mode);
-        setStatus(result.source === "device" ? "LIVE SKY" : "LIVE SKY");
+        setPlaceName(result.source === "device" ? "DEVICE SKY" : formatPlace(DEFAULT_PLACE));
+        setStatus("LIVE SKY");
       })
       .catch(() => {
         if (alive) setStatus("OFFLINE SKY");
+      })
+      .finally(() => {
+        if (alive) setIsLoadingWeather(false);
       });
     return () => {
       alive = false;
@@ -305,6 +366,39 @@ function App() {
     [selected],
   );
 
+  const handleCitySearch = async (event) => {
+    event.preventDefault();
+    const query = cityQuery.trim();
+    if (!query) return;
+    setIsSearching(true);
+    setStatus("TUNING SKY");
+    try {
+      const places = await searchPlaces(query);
+      setCityResults(places);
+      setStatus(places.length ? "CHOOSE CITY" : "NO CITY SIGNAL");
+    } catch {
+      setCityResults([]);
+      setStatus("OFFLINE SKY");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handlePlaceSelect = async (place) => {
+    setIsLoadingWeather(true);
+    setStatus("LIVE SKY");
+    setPlaceName(formatPlace(place));
+    setCityResults([]);
+    try {
+      const result = await fetchWeatherMode(place);
+      setMode(result.mode);
+    } catch {
+      setStatus("OFFLINE SKY");
+    } finally {
+      setIsLoadingWeather(false);
+    }
+  };
+
   return (
     <main className={`app mode-${mode}`} style={paletteStyle}>
       <section className="console" aria-label="像素天气体验">
@@ -315,7 +409,7 @@ function App() {
           </div>
           <div className="live-chip">
             <span />
-            {status}
+            {isLoadingWeather ? "TUNING SKY" : status}
           </div>
         </header>
 
@@ -342,18 +436,46 @@ function App() {
         </div>
       </section>
 
-      <aside className="mode-rail" aria-label="氛围模式">
-        {modeList.map((item) => (
-          <button
-            className={`mode-card ${mode === item.id ? "active" : ""}`}
-            key={item.id}
-            onClick={() => setMode(item.id)}
-            style={{ "--card-accent": item.palette[3], "--card-bg": item.palette[1] }}
-          >
-            <span className="mode-glyph">{item.kanji}</span>
-            <span>{item.label}</span>
-          </button>
-        ))}
+      <aside className="side-panel" aria-label="天气控制">
+        <form className="city-panel" onSubmit={handleCitySearch}>
+          <label htmlFor="city-search">CITY SIGNAL</label>
+          <div className="city-input-row">
+            <input
+              id="city-search"
+              value={cityQuery}
+              onChange={(event) => setCityQuery(event.target.value)}
+              placeholder="Tokyo / Paris / 上海"
+              autoComplete="off"
+            />
+            <button type="submit" disabled={isSearching}>
+              {isSearching ? "..." : "SCAN"}
+            </button>
+          </div>
+          <div className="place-readout">{placeName}</div>
+          {cityResults.length > 0 && (
+            <div className="city-results" aria-label="城市候选">
+              {cityResults.map((place) => (
+                <button type="button" key={place.id} onClick={() => handlePlaceSelect(place)}>
+                  {formatPlace(place)}
+                </button>
+              ))}
+            </div>
+          )}
+        </form>
+
+        <div className="mode-rail" aria-label="氛围模式">
+          {modeList.map((item) => (
+            <button
+              className={`mode-card ${mode === item.id ? "active" : ""}`}
+              key={item.id}
+              onClick={() => setMode(item.id)}
+              style={{ "--card-accent": item.palette[3], "--card-bg": item.palette[1] }}
+            >
+              <span className="mode-glyph">{item.kanji}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
       </aside>
     </main>
   );
