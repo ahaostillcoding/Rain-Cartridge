@@ -2,14 +2,15 @@
   "name": "像素天气",
   "short_name": "像素天气",
   "description": "GameBoy 情感、孤独、低保真天气体验。",
-  "start_url": "/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0a1624",
   "theme_color": "#0a1624",
   "icons": [
     {
-      "src": "/icons/icon.svg",
+      "src": "icons/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

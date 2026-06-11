@@ -1,5 +1,11 @@
 const CACHE = "pixel-weather-v1";
-const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
+const BASE = self.registration.scope;
+const ASSETS = [
+  BASE,
+  `${BASE}index.html`,
+  `${BASE}manifest.webmanifest`,
+  `${BASE}icons/icon.svg`,
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
